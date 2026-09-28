@@ -41,3 +41,33 @@ async fn handle(method:&str,p:&Value,root:&Path,write_enabled:bool,terminal_enab
  let mut capabilities=vec!["system.info","fs.list","fs.read"];if write_enabled{capabilities.push("fs.write")}if terminal_enabled{capabilities.push("terminal.exec")}
  loop{match connect_async(&url).await{Ok((mut ws,_))=>{ws.send(Message::Text(json!({"type":"hello","protocol":1,"agentId":agent_id,"token":token,"platform":env::consts::OS,"capabilities":capabilities}).to_string().into())).await?;let mut beat=tokio::time::interval(Duration::from_secs(15));loop{tokio::select!{_=beat.tick()=>{ws.send(Message::Text(json!({"type":"heartbeat","ts":0}).to_string().into())).await?},item=ws.next()=>{let Some(item)=item else{break};let msg=item?;if !msg.is_text(){continue}let v:Value=serde_json::from_str(msg.to_text()?)?;if v["type"]=="hello_ack"{println!("[agent] connected {}",v["sessionId"]);continue}if v["type"]=="command"{let id=v["id"].clone();let r=handle(v["method"].as_str().unwrap_or(""),&v["params"],&root,write_enabled,terminal_enabled,&programs).await;let out=match r{Ok(x)=>json!({"type":"result","id":id,"ok":true,"result":x}),Err(e)=>json!({"type":"result","id":id,"ok":false,"error":e})};ws.send(Message::Text(out.to_string().into())).await?;}}}}},Err(e)=>eprintln!("[agent] connect failed: {e}")}tokio::time::sleep(Duration::from_secs(3)).await;}
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_absolute_and_parent_paths() {
+        assert!(clean_relative("../escape").is_err());
+        assert!(clean_relative("/absolute").is_err());
+        assert!(clean_relative("safe/file.txt").is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlink_escape_for_read_and_write() {
+        use std::os::unix::fs::symlink;
+        let base=env::temp_dir().join(format!("oc-path-test-{}",uuid::Uuid::new_v4()));
+        let root=base.join("root");
+        let outside=base.join("outside");
+        fs::create_dir_all(&root).unwrap();
+        fs::create_dir_all(&outside).unwrap();
+        fs::write(outside.join("secret.txt"),"secret").unwrap();
+        symlink(outside.join("secret.txt"),root.join("link.txt")).unwrap();
+        let canonical_root=fs::canonicalize(&root).unwrap();
+        assert!(safe_existing(&canonical_root,"link.txt").is_err());
+        assert!(safe_write(&canonical_root,"link.txt").is_err());
+        fs::remove_dir_all(base).unwrap();
+    }
+}
