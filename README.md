@@ -1,30 +1,30 @@
-# Commander MCP v0.5
+# Commander MCP v0.6
 
-Self-hosted remote execution foundation with per-device authentication and default-deny write/terminal policy.
+Self-hosted remote execution foundation with per-device authentication, workspace confinement and one-time approval gates.
 
-## Security baseline
+## Default security posture
 
-- Gateway binds to `127.0.0.1` unless `GATEWAY_HOST` is explicitly changed.
-- Authentication uses a **per-device credential store**. Git stores only the example file; live `config/agents.json` is ignored.
-- Device tokens are never stored plaintext by the Gateway; the credential store contains SHA-256 of high-entropy 32+ character tokens.
-- `enabled:false` revokes a device. Token rotation changes its hash. Gateway reloads credentials every ~15s and disconnects already-connected revoked/rotated sessions.
-- WebSocket payloads are capped at 256 KiB.
-- Remote writes are disabled unless both Gateway and Agent enable them.
-- Terminal execution is disabled unless both sides enable it.
-- Terminal uses structured `program + args`; there is no `sh -lc` / `cmd /C`.
-- Executables must be present in the operator allowlist.
-- Filesystem targets are canonicalized against the workspace boundary, including existing symlink targets.
-- CI runs TypeScript builds, policy/auth tests, Rust tests and symlink/path regressions.
+- Gateway binds to `127.0.0.1` unless explicitly changed.
+- Devices authenticate with per-device credentials; Gateway stores SHA-256 digests, not plaintext tokens.
+- Credential rotation/revocation is detected by live reload and disconnects old sessions.
+- WebSocket payloads are capped.
+- Reads are workspace-confined and symlink-aware.
+- Remote writes and terminal execution are disabled by default at **both** Gateway and Agent.
+- Terminal uses structured `program + args`, never arbitrary `sh -lc` / `cmd /C`.
+- Executables require an operator allowlist.
+- When write/terminal capabilities are enabled, each individual command additionally requires a **one-time approval** bound to agent, method, exact canonical params and expiration time.
+- Approval IDs are removed before dispatch to the Agent and are consumed atomically by the single Gateway process.
+- CI builds TypeScript, tests auth/policy/approval semantics, and runs Rust traversal/symlink regressions.
 
-## First device enrollment
+## Device enrollment
 
-Generate a high-entropy token, for example:
+Generate a high-entropy token and keep it only on the Agent:
 
 ```bash
 openssl rand -hex 32
 ```
 
-Set the same token only on the Agent. Start the Agent once with its real `OC_WORKSPACE`; it prints its stable `agentId` before connecting.
+Start the Agent with its real `OC_WORKSPACE`; it prints the stable `agentId`.
 
 Hash the token:
 
@@ -32,28 +32,46 @@ Hash the token:
 npm run credential:hash -- '<token>'
 ```
 
-Copy `config/agents.example.json` to the ignored `config/agents.json`, replace the example agent ID and hash, then start the Gateway:
+Copy `config/agents.example.json` to ignored `config/agents.json`, insert the device ID and digest, then:
 
 ```bash
 AGENT_CREDENTIALS_FILE=./config/agents.json npm start
 ```
 
-The Agent will reconnect automatically.
+## High-risk capability enablement
 
-## High-risk capabilities
+Both Gateway and Agent must opt in.
 
-Both ends must opt in:
+Gateway:
 
 ```bash
-# Gateway
 OC_ALLOW_WRITES=1
 OC_ALLOW_TERMINAL=1
 OC_TERMINAL_PROGRAMS=git,node,npm
+OC_APPROVALS_FILE=./config/approvals.json
+```
 
-# Agent
+Agent:
+
+```bash
 OC_ENABLE_WRITES=1
 OC_ENABLE_TERMINAL=1
 OC_TERMINAL_PROGRAMS=git,node,npm
 ```
 
-These controls reduce exposure but are **not an OS sandbox**. Internet-facing or untrusted execution still requires WSS/TLS, OS-level isolation, approval objects and resource controls.
+## One-time approval
+
+Prepare exact params, then create an approval:
+
+```bash
+OC_APPROVALS_FILE=./config/approvals.json \
+npm run approval:create -- oc-device-1 fs.write '{"path":"notes.txt","content":"hello"}' 300
+```
+
+The CLI returns an `approvalId`. The control layer must attach that ID to the **same exact** request. Any changed path/content/program/args, expired approval or reused approval is rejected.
+
+See `docs/APPROVALS.md`, `docs/CREDENTIALS.md` and `docs/SECURITY.md`.
+
+## Remaining production boundary
+
+v0.6 materially reduces remote-execution risk, but it is not an OS sandbox. Before hostile/Internet-facing use: WSS/TLS, signed/short-lived device enrollment, durable tamper-evident audit, process/resource sandboxing, command cancellation and a real human approval UI/API are still required.
