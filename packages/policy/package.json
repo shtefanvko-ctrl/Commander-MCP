@@ -1,1 +1,1 @@
-{"name":"@oc/policy","version":"0.3.0","type":"module","main":"dist/index.js","types":"dist/index.d.ts","scripts":{"build":"tsc -p tsconfig.json"},"devDependencies":{"typescript":"^5.6.3"}}
+{"name":"@oc/policy","version":"0.4.0","type":"module","main":"dist/index.js","types":"dist/index.d.ts","scripts":{"build":"tsc -p tsconfig.json"},"devDependencies":{"typescript":"^5.6.3"}}
