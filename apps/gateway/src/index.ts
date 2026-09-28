@@ -5,6 +5,7 @@ import { dirname } from 'node:path';
 import { PROTOCOL_VERSION, type AgentMessage, type GatewayMessage, type Capability } from '@oc/protocol';
 import { decide, type PolicyConfig } from '@oc/policy';
 import { loadCredentialStore, tokenSha256, verifyAgentToken, type AgentCredentialStore } from '@oc/auth';
+import { commandParams, consumeApproval } from '@oc/approvals';
 
 const host=process.env.GATEWAY_HOST??'127.0.0.1';
 const port=Number(process.env.PORT??8787);
@@ -18,6 +19,8 @@ const policy:PolicyConfig={
  allowTerminal:process.env.OC_ALLOW_TERMINAL==='1',
  terminalPrograms:(process.env.OC_TERMINAL_PROGRAMS??'').split(',').map(x=>x.trim()).filter(Boolean)
 };
+const approvalFile=process.env.OC_APPROVALS_FILE??'';
+if((policy.allowWrites||policy.allowTerminal)&&!approvalFile)throw new Error('OC_APPROVALS_FILE is required when write or terminal capabilities are enabled');
 const wss=new WebSocketServer({host,port,maxPayload:256*1024});
 const agents=new Map<string,{ws:WebSocket;capabilities:Capability[];lastSeen:number;sessionId:string;credentialHash:string}>();
 const pending=new Map<string,{agentId:string;method:Capability;started:number}>();
@@ -47,7 +50,15 @@ function sendCommand(agentId:string,method:Capability,params:Record<string,unkno
  const d=decide(method,params,a.capabilities,policy);
  void audit({event:'policy',agentId,method,allow:d.allow,risk:d.risk,reason:d.reason});
  if(!d.allow)throw new Error(d.reason);
- const id=randomUUID();const msg:GatewayMessage={type:'command',id,method,params};
+ let dispatchParams=params;
+ if(method==='fs.write'||method==='terminal.exec'){
+  const approvalId=String(params.approvalId??'');
+  if(!approvalId)throw new Error('one-time approvalId is required for high-risk command');
+  consumeApproval(approvalFile,{approvalId,agentId,method,params});
+  dispatchParams=commandParams(params);
+  void audit({event:'approval.consumed',approvalId,agentId,method});
+ }
+ const id=randomUUID();const msg:GatewayMessage={type:'command',id,method,params:dispatchParams};
  pending.set(id,{agentId,method,started:Date.now()});
  a.ws.send(JSON.stringify(msg));
  void audit({event:'command.sent',id,agentId,method});
