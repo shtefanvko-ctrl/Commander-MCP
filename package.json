@@ -1,0 +1,17 @@
+{
+  "name": "own-commander",
+  "private": true,
+  "version": "0.3.0",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build -w @oc/protocol && npm run build -w @oc/policy && npm run build -w @oc/gateway",
+    "start": "npm run start -w @oc/gateway"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
