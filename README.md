@@ -1,38 +1,45 @@
-# Commander MCP v0.3
+# Commander MCP v0.4
 
 Self-hosted remote execution foundation.
 
-## Included
+## Security baseline
 
-- TypeScript WebSocket Gateway
-- Rust outbound-only Agent
-- shared protocol package
-- capability-aware Policy Engine
-- workspace-confined file operations
-- terminal execution with timeout
-- heartbeat + stale-agent eviction
-- NDJSON audit log
+v0.4 changes the default posture to deny-by-default:
+
+- `AGENT_TOKEN` is mandatory and must be at least 32 characters.
+- Gateway binds to `127.0.0.1` unless `GATEWAY_HOST` is explicitly changed.
+- WebSocket payloads are capped.
+- Duplicate agent sessions replace the older session.
+- Remote writes are disabled unless both gateway and agent explicitly enable them.
+- Terminal execution is disabled unless both sides enable it.
+- Terminal uses structured `program + args`; shell strings are no longer executed with `sh -lc` / `cmd /C`.
+- Executables must be in an operator allowlist.
+- Existing and write-target paths are canonicalized against the workspace boundary, including final symlink targets.
+- CI builds TypeScript and runs policy regression tests.
 
 ## Development
 
 ```bash
 npm install
+export AGENT_TOKEN='<32+ random characters>'
+npm test
 npm run build
-AGENT_TOKEN=change-me npm start
+npm start
 ```
 
-Agent environment: `GATEWAY_URL`, `AGENT_TOKEN`, `OC_WORKSPACE`.
+Optional high-risk capabilities:
 
-## Security status
+```bash
+OC_ALLOW_WRITES=1
+OC_ENABLE_WRITES=1
 
-**Not production-ready.**
+OC_ALLOW_TERMINAL=1
+OC_ENABLE_TERMINAL=1
+OC_TERMINAL_PROGRAMS=git,node,npm
+```
 
-P0:
-- replace the shared agent token with enrollment + per-device credentials;
-- bind/terminate transport explicitly and use TLS for remote deployment;
-- canonicalize the final write target to prevent symlink escape;
-- replace terminal regex denylisting with an allow/approval execution contract;
-- add explicit approval for write/exec/destructive/privileged actions;
-- add command streaming/cancel and durable request/result correlation.
+These flags are an operator decision, not a sandbox. OS-level isolation is still required before exposing terminal execution to untrusted workloads.
 
-The repository preserves v0.3 as a development baseline, not as a hardened remote-admin product.
+## Status
+
+Gateway/Policy v0.4 source is hardened and Policy smoke tests pass locally. Rust-agent source was hardened but still requires a Rust toolchain CI/build check before release.
