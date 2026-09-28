@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "agents": {
+    "oc-replace-with-agent-id": {
+      "tokenSha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "enabled": true
+    }
+  }
+}
