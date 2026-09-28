@@ -8,7 +8,7 @@ permissions:
   contents: read
 
 jobs:
-  build-and-policy:
+  typescript:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,3 +18,10 @@ jobs:
       - run: npm install
       - run: npm test
       - run: npm run build -w @oc/gateway
+
+  rust-agent:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo check --manifest-path agent/rust/Cargo.toml
