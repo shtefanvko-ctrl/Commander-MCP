@@ -1,16 +1,17 @@
 {
   "name": "own-commander",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.5.0",
   "type": "module",
   "workspaces": [
     "apps/*",
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build -w @oc/protocol && npm run build -w @oc/policy && npm run build -w @oc/gateway",
+    "build": "npm run build -w @oc/protocol && npm run build -w @oc/auth && npm run build -w @oc/policy && npm run build -w @oc/gateway",
     "start": "npm run start -w @oc/gateway",
-    "test": "npm run build -w @oc/protocol && npm run build -w @oc/policy && node --test packages/policy/test/*.test.mjs"
+    "test": "npm run build -w @oc/protocol && npm run build -w @oc/auth && npm run build -w @oc/policy && node --test packages/auth/test/*.test.mjs packages/policy/test/*.test.mjs",
+    "credential:hash": "node scripts/hash-agent-token.mjs"
   },
   "engines": {
     "node": ">=20"
