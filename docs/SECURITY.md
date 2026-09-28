@@ -1,38 +1,52 @@
-# Security baseline v0.5
+# Security baseline v0.6
 
-## Closed since v0.3
+## Closed from the original v0.3 baseline
 
-- Removed default `dev-change-me` credential.
-- Replaced one shared Gateway bearer token with per-device credential records.
-- Gateway stores only SHA-256 digests of high-entropy device tokens.
-- Device records support `enabled:false` revocation.
-- Gateway reloads the credential store and disconnects sessions whose credential was revoked or rotated.
-- Gateway uses explicit host binding and a WebSocket payload cap.
-- `fs.write` defaults to disabled at Gateway and Agent.
-- `terminal.exec` defaults to disabled at Gateway and Agent.
-- Terminal execution uses structured executable + argument arrays; no shell string execution.
-- Operator executable allowlists are enforced at Gateway and Agent.
-- Absolute paths and parent traversal are rejected.
-- Reads canonicalize the final target.
-- Existing write targets canonicalize the final target, preventing direct symlink escape.
-- New write targets canonicalize and validate the parent before creation.
-- Duplicate agent sessions replace the old connection.
-- Pending command records expire.
+### Authentication
+- No default development credential.
+- Per-device credential records instead of one global token.
+- Gateway stores SHA-256 token digests.
+- Device revocation and rotation force existing sessions closed.
+- Live credential file is excluded from Git.
+
+### Filesystem
+- Absolute paths and parent traversal rejected on Agent.
+- Read targets canonicalized.
+- Existing write targets canonicalized, blocking direct symlink escape.
+- New write targets require a canonical in-workspace parent.
 - Rust regression tests cover traversal and Unix symlink escape.
 
-## Remaining P0 before hostile / Internet-facing production use
+### Terminal
+- Disabled by default at Gateway and Agent.
+- No arbitrary shell strings.
+- Structured executable + argument arrays.
+- Executable name allowlist enforced by Gateway and Agent.
 
-1. Replace manual long-lived bearer-token enrollment with short-lived bootstrap credentials or mutually authenticated device keys/certificates.
-2. Use WSS/TLS with server identity validation for any non-local transport.
-3. Add explicit human approval objects for write/exec, not only environment switches.
-4. Add OS-level sandboxing/containerization. Workspace `cwd` is not a complete process sandbox.
-5. Add signed/tamper-evident audit records and durable request/result correlation.
-6. Add command cancellation/streaming and CPU/memory/process ceilings.
-7. Add Windows-specific symlink/reparse-point security tests and protocol fuzzing.
+### Human control
+- `fs.write` and `terminal.exec` require a one-time approval when enabled.
+- Approval binds exact agent, method and canonical request hash.
+- Approval has bounded TTL (maximum 1 hour).
+- Used approval cannot be replayed.
+- Modified params fail request-hash verification.
+- Approval metadata is stripped before command dispatch.
 
-## Secret handling
+## Remaining P0 for hostile / Internet-facing production use
 
-- Never commit `config/agents.json`, plaintext device tokens, private keys or tunnel credentials.
-- Store Agent plaintext token only in the device secret environment/store.
-- Audit events must not include the hello token.
-- Rotation replaces the stored digest and the Agent secret; the previous token must be discarded.
+1. WSS/TLS with explicit server identity validation.
+2. Short-lived bootstrap enrollment or mutually authenticated device keys/certificates rather than long-lived bearer tokens.
+3. Approval service/UI with authenticated human identity, reason, policy context and durable storage.
+4. OS-level sandboxing/containerization and CPU/memory/process/network ceilings.
+5. Signed/tamper-evident durable audit and correlation storage.
+6. Command cancellation/streaming.
+7. Windows reparse-point security regression coverage.
+8. Protocol fuzzing and abuse/rate-limit tests.
+
+## Secret and approval handling
+
+Never commit:
+- `config/agents.json`;
+- `config/approvals.json`;
+- plaintext agent tokens;
+- private keys/tunnel credentials.
+
+Approval files are control-plane state, not source code. Production approval state should move to a transactional store before multi-Gateway deployment.
