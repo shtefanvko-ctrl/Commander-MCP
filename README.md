@@ -1,10 +1,13 @@
-# Commander MCP v0.6
+# Commander MCP v0.7
 
-Self-hosted remote execution foundation with per-device authentication, workspace confinement and one-time approval gates.
+Self-hosted remote execution foundation with per-device authentication, workspace confinement, one-time approvals and enforced secure transport.
 
 ## Default security posture
 
 - Gateway binds to `127.0.0.1` unless explicitly changed.
+- Any **non-loopback Gateway binding requires TLS** via `GATEWAY_TLS_CERT` + `GATEWAY_TLS_KEY`.
+- Agent accepts `ws://` only for loopback (`127.0.0.1`, `localhost`, `::1`); all remote Gateway URLs must use `wss://`.
+- Rust Agent enables rustls/webpki root validation for WSS server identity.
 - Devices authenticate with per-device credentials; Gateway stores SHA-256 digests, not plaintext tokens.
 - Credential rotation/revocation is detected by live reload and disconnects old sessions.
 - WebSocket payloads are capped.
@@ -12,35 +15,41 @@ Self-hosted remote execution foundation with per-device authentication, workspac
 - Remote writes and terminal execution are disabled by default at **both** Gateway and Agent.
 - Terminal uses structured `program + args`, never arbitrary `sh -lc` / `cmd /C`.
 - Executables require an operator allowlist.
-- When write/terminal capabilities are enabled, each individual command additionally requires a **one-time approval** bound to agent, method, exact canonical params and expiration time.
-- Approval IDs are removed before dispatch to the Agent and are consumed atomically by the single Gateway process.
-- CI builds TypeScript, tests auth/policy/approval semantics, and runs Rust traversal/symlink regressions.
+- Each enabled write/terminal command additionally requires a **one-time approval** bound to agent, method, exact canonical params and expiration time.
+- CI builds TypeScript, tests auth/policy/approval/transport semantics, and runs Rust traversal/symlink/transport regressions.
 
-## Device enrollment
+## Local development
 
-Generate a high-entropy token and keep it only on the Agent:
-
-```bash
-openssl rand -hex 32
-```
-
-Start the Agent with its real `OC_WORKSPACE`; it prints the stable `agentId`.
-
-Hash the token:
+Loopback may use plain WebSocket:
 
 ```bash
-npm run credential:hash -- '<token>'
+GATEWAY_HOST=127.0.0.1
+GATEWAY_URL=ws://127.0.0.1:8787
 ```
 
-Copy `config/agents.example.json` to ignored `config/agents.json`, insert the device ID and digest, then:
+## Remote deployment
+
+Remote listening must provide TLS material:
 
 ```bash
-AGENT_CREDENTIALS_FILE=./config/agents.json npm start
+GATEWAY_HOST=0.0.0.0
+GATEWAY_TLS_CERT=/secure/path/fullchain.pem
+GATEWAY_TLS_KEY=/secure/path/privkey.pem
+AGENT_CREDENTIALS_FILE=./config/agents.json
+npm start
 ```
+
+Agent:
+
+```bash
+GATEWAY_URL=wss://commander.example.com:8787
+```
+
+The Agent uses standard WebPKI validation. Do not disable certificate verification.
 
 ## High-risk capability enablement
 
-Both Gateway and Agent must opt in.
+Both Gateway and Agent must opt in and each command still needs a one-time approval.
 
 Gateway:
 
@@ -59,19 +68,8 @@ OC_ENABLE_TERMINAL=1
 OC_TERMINAL_PROGRAMS=git,node,npm
 ```
 
-## One-time approval
-
-Prepare exact params, then create an approval:
-
-```bash
-OC_APPROVALS_FILE=./config/approvals.json \
-npm run approval:create -- oc-device-1 fs.write '{"path":"notes.txt","content":"hello"}' 300
-```
-
-The CLI returns an `approvalId`. The control layer must attach that ID to the **same exact** request. Any changed path/content/program/args, expired approval or reused approval is rejected.
-
 See `docs/APPROVALS.md`, `docs/CREDENTIALS.md` and `docs/SECURITY.md`.
 
 ## Remaining production boundary
 
-v0.6 materially reduces remote-execution risk, but it is not an OS sandbox. Before hostile/Internet-facing use: WSS/TLS, signed/short-lived device enrollment, durable tamper-evident audit, process/resource sandboxing, command cancellation and a real human approval UI/API are still required.
+v0.7 closes the plaintext remote transport gap, but hostile/untrusted execution still requires short-lived enrollment or device keys/certificates, durable tamper-evident audit, OS sandboxing/resource ceilings, cancellation/streaming, Windows reparse-point coverage and a real authenticated approval service/UI.
