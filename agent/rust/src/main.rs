@@ -29,6 +29,11 @@ fn safe_write(root:&Path,raw:&str)->Result<PathBuf,String>{
 fn stable_agent_id(root:&Path)->String{let mut h=Sha256::new();h.update(env::consts::OS);h.update(root.to_string_lossy().as_bytes());if let Ok(host)=env::var("COMPUTERNAME").or_else(|_|env::var("HOSTNAME")){h.update(host)}format!("oc-{}",&hex::encode(h.finalize())[..24])}
 fn flag(name:&str)->bool{env::var(name).map(|v|v=="1").unwrap_or(false)}
 fn allowed_programs()->Vec<String>{env::var("OC_TERMINAL_PROGRAMS").unwrap_or_default().split(',').map(str::trim).filter(|x|!x.is_empty()).map(str::to_string).collect()}
+fn validate_gateway_url(url:&str)->Result<(),String>{
+ if url.starts_with("wss://"){return Ok(())}
+ if url.starts_with("ws://127.0.0.1:")||url.starts_with("ws://localhost:")||url.starts_with("ws://[::1]:"){return Ok(())}
+ Err("remote Gateway URL must use wss://".into())
+}
 async fn handle(method:&str,p:&Value,root:&Path,write_enabled:bool,terminal_enabled:bool,programs:&[String])->Result<Value,String>{match method{
 "system.info"=>{let mut s=System::new_all();s.refresh_all();Ok(json!({"os":System::name(),"osVersion":System::os_version(),"kernel":System::kernel_version(),"cpuCount":s.cpus().len(),"memoryTotal":s.total_memory(),"memoryUsed":s.used_memory(),"workspace":root}))},
 "fs.list"=>{let path=safe_existing(root,p["path"].as_str().unwrap_or("."))?;let mut a=vec![];for e in fs::read_dir(path).map_err(|e|e.to_string())?{let e=e.map_err(|e|e.to_string())?;let m=e.metadata().map_err(|e|e.to_string())?;a.push(json!({"name":e.file_name().to_string_lossy(),"dir":m.is_dir(),"size":m.len()}));}Ok(json!(a))},
@@ -36,7 +41,7 @@ async fn handle(method:&str,p:&Value,root:&Path,write_enabled:bool,terminal_enab
 "fs.write"=>{if !write_enabled{return Err("remote writes disabled on agent".into())}let path=safe_write(root,p["path"].as_str().ok_or("path required")?)?;let content=p["content"].as_str().ok_or("content required")?;if content.len()>1_048_576{return Err("write exceeds 1 MiB limit".into())}fs::write(&path,content).map_err(|e|e.to_string())?;Ok(json!({"written":content.len()}))},
 "terminal.exec"=>{if !terminal_enabled{return Err("terminal execution disabled on agent".into())}let program=p["program"].as_str().ok_or("program required")?;if program.contains('/')||program.contains('\\')||!programs.iter().any(|x|x==program){return Err("program not in agent allowlist".into())}let args=p["args"].as_array().ok_or("args array required")?.iter().map(|v|v.as_str().ok_or("args must be strings").map(str::to_string)).collect::<Result<Vec<_>,_>>()?;let cwd=safe_existing(root,p["cwd"].as_str().unwrap_or("."))?;let mut c=Command::new(program);c.args(args);c.current_dir(cwd);let out=timeout(Duration::from_secs(30),c.output()).await.map_err(|_|"command timeout".to_string())?.map_err(|e|e.to_string())?;Ok(json!({"exitCode":out.status.code(),"stdout":String::from_utf8_lossy(&out.stdout),"stderr":String::from_utf8_lossy(&out.stderr)}))},_=>Err("unsupported method".into())}}
 #[tokio::main]async fn main()->Result<(),Box<dyn std::error::Error>>{
- let url=env::var("GATEWAY_URL").unwrap_or("ws://127.0.0.1:8787".into());let token=env::var("AGENT_TOKEN").expect("AGENT_TOKEN is required");if token.len()<32{panic!("AGENT_TOKEN must contain at least 32 characters")}
+ let url=env::var("GATEWAY_URL").unwrap_or("ws://127.0.0.1:8787".into());validate_gateway_url(&url).expect("invalid GATEWAY_URL transport");let token=env::var("AGENT_TOKEN").expect("AGENT_TOKEN is required");if token.len()<32{panic!("AGENT_TOKEN must contain at least 32 characters")}
  let root=workspace();let agent_id=stable_agent_id(&root);let write_enabled=flag("OC_ENABLE_WRITES");let terminal_enabled=flag("OC_ENABLE_TERMINAL");let programs=allowed_programs();
  let mut capabilities=vec!["system.info","fs.list","fs.read"];if write_enabled{capabilities.push("fs.write")}if terminal_enabled{capabilities.push("terminal.exec")}
  println!("[agent] id={} workspace={} writes={} terminal={}",agent_id,root.display(),write_enabled,terminal_enabled);
@@ -47,6 +52,15 @@ async fn handle(method:&str,p:&Value,root:&Path,write_enabled:bool,terminal_enab
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn enforces_wss_for_remote_gateway() {
+        assert!(validate_gateway_url("ws://127.0.0.1:8787").is_ok());
+        assert!(validate_gateway_url("ws://localhost:8787").is_ok());
+        assert!(validate_gateway_url("wss://commander.example.com").is_ok());
+        assert!(validate_gateway_url("ws://10.0.0.5:8787").is_err());
+        assert!(validate_gateway_url("ws://commander.example.com:8787").is_err());
+    }
 
     #[test]
     fn rejects_absolute_and_parent_paths() {
