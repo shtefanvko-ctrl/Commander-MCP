@@ -1,0 +1,13 @@
+{
+  "schema": "commander-mcp.agent-skills.v1",
+  "skills": [
+    "commander-secure-exec",
+    "commander-approval-contract",
+    "commander-transport-workspace",
+    "commander-protocol-policy",
+    "commander-verification-audit",
+    "commander-devil-review"
+  ],
+  "securityFirst": true,
+  "noDuplicateSkills": true
+}
